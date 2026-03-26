@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import MagicMock, call
 
-from wman import enumerate_windows, find_window, move_window
+from wman import enumerate_windows, find_window, move_window, snap_window
 
 
 class TestEnumerateWindows(unittest.TestCase):
@@ -131,6 +131,48 @@ class TestMoveWindow(unittest.TestCase):
         win32 = self._make_win32(is_minimized=False)
         move_window(win32, 100, x=0, y=0, width=800, height=600)
         win32.show_window.assert_not_called()
+
+
+class TestSnapWindow(unittest.TestCase):
+    """snap_window() should snap a window to the left or right half of the work area."""
+
+    def _make_win32(self, work_area=(0, 0, 1920, 1040), is_minimized=False):
+        win32 = MagicMock()
+        wa = MagicMock()
+        wa.left, wa.top, wa.right, wa.bottom = work_area
+        win32.get_work_area.return_value = wa
+        win32.is_iconic.return_value = is_minimized
+        rect = MagicMock()
+        rect.left, rect.top, rect.right, rect.bottom = (100, 100, 500, 400)
+        win32.get_window_rect.return_value = rect
+        return win32
+
+    def test_snap_left(self):
+        win32 = self._make_win32(work_area=(0, 0, 1920, 1040))
+        snap_window(win32, 100, "left")
+        win32.move_window.assert_called_once_with(100, 0, 0, 960, 1040)
+
+    def test_snap_right(self):
+        win32 = self._make_win32(work_area=(0, 0, 1920, 1040))
+        snap_window(win32, 100, "right")
+        win32.move_window.assert_called_once_with(100, 960, 0, 960, 1040)
+
+    def test_snap_right_odd_width(self):
+        # wa_width=1921: left gets 960, right gets 961 (no 1-pixel gap)
+        win32 = self._make_win32(work_area=(0, 0, 1921, 1040))
+        snap_window(win32, 100, "right")
+        win32.move_window.assert_called_once_with(100, 960, 0, 961, 1040)
+
+    def test_snap_with_nonzero_work_area_origin(self):
+        # Taskbar on left, work area starts at x=60
+        win32 = self._make_win32(work_area=(60, 0, 1920, 1040))
+        snap_window(win32, 100, "left")
+        win32.move_window.assert_called_once_with(100, 60, 0, 930, 1040)
+
+    def test_snap_restores_minimized_window(self):
+        win32 = self._make_win32(is_minimized=True)
+        snap_window(win32, 100, "left")
+        win32.show_window.assert_called_once_with(100, 9)
 
 
 if __name__ == "__main__":

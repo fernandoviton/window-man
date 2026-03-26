@@ -110,3 +110,20 @@ def move_window(win32, hwnd, x=None, y=None, width=None, height=None):
         width if width is not None else cur_w,
         height if height is not None else cur_h,
     )
+
+
+def snap_window(win32, hwnd, direction):
+    """Snap a window to the left or right half of the primary monitor's work area."""
+    if win32.is_iconic(hwnd):
+        win32.show_window(hwnd, SW_RESTORE)
+
+    wa = win32.get_work_area()
+    wa_width = wa.right - wa.left
+    wa_height = wa.bottom - wa.top
+
+    if direction == "left":
+        win32.move_window(hwnd, wa.left, wa.top, wa_width // 2, wa_height)
+    else:
+        win32.move_window(
+            hwnd, wa.left + wa_width // 2, wa.top, wa_width - wa_width // 2, wa_height
+        )
