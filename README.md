@@ -2,6 +2,13 @@
 
 A proof-of-concept CLI window manager for Windows. List visible windows, move/resize them, and snap them to screen halves. Zero external dependencies — uses Python's `ctypes` to call Win32 APIs directly.
 
+## Setup
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+```
+
 ## Usage
 
 ### Interactive mode
@@ -64,9 +71,8 @@ All Win32 APIs are mocked — tests run on any platform.
 ## Limitations
 
 - Snapping targets the primary monitor only. Multi-monitor support would require `MonitorFromWindow` + `GetMonitorInfoW`.
-- Title matching returns the first match found.
+- Title matching fails if multiple windows match, listing all candidates.
 
 ## TODO
-- Change title matching to fail and notify if multiple are found (and show the multiple it could be - bash like)
 - Explore launching
 - Do full persistence and rehydration

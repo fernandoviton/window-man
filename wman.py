@@ -90,9 +90,14 @@ def find_window(win32, value):
 
     # Treat as title substring (case-insensitive)
     needle = value.lower()
-    for hwnd, title in windows.items():
-        if needle in title.lower():
-            return hwnd
+    matches = {h: t for h, t in windows.items() if needle in t.lower()}
+    if len(matches) == 1:
+        return next(iter(matches))
+    if len(matches) > 1:
+        lines = [f"  {h:#x}  {t}" for h, t in matches.items()]
+        raise ValueError(
+            f"'{value}' matches {len(matches)} windows:\n" + "\n".join(lines)
+        )
     raise ValueError(f"No window matching '{value}'")
 
 

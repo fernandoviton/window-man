@@ -95,6 +95,26 @@ class TestFindWindow(unittest.TestCase):
         with self.assertRaises(ValueError):
             find_window(win32, "999")
 
+    def test_multiple_matches_raises(self):
+        win32 = self._make_win32({
+            100: "Untitled - Notepad",
+            200: "README.md - Notepad",
+        })
+        with self.assertRaises(ValueError) as cm:
+            find_window(win32, "notepad")
+        msg = str(cm.exception)
+        self.assertIn("Untitled - Notepad", msg)
+        self.assertIn("README.md - Notepad", msg)
+
+    def test_single_match_among_many_returns_hwnd(self):
+        win32 = self._make_win32({
+            100: "Untitled - Notepad",
+            200: "Calculator",
+            300: "Chrome",
+        })
+        hwnd = find_window(win32, "calc")
+        self.assertEqual(hwnd, 200)
+
 
 class TestMoveWindow(unittest.TestCase):
     """move_window() should move/resize a window, restoring it if minimized."""
