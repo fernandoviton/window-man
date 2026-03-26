@@ -1,9 +1,11 @@
 """Tests for wman.py."""
 
+import io
+import sys
 import unittest
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock, call, patch
 
-from wman import enumerate_windows, find_window, move_window, snap_window
+from wman import enumerate_windows, find_window, move_window, snap_window, main
 
 
 class TestEnumerateWindows(unittest.TestCase):
@@ -173,6 +175,106 @@ class TestSnapWindow(unittest.TestCase):
         win32 = self._make_win32(is_minimized=True)
         snap_window(win32, 100, "left")
         win32.show_window.assert_called_once_with(100, 9)
+
+
+class _CLITestBase(unittest.TestCase):
+    """Shared helpers for CLI tests."""
+
+    def _make_win32(self, windows=None, work_area=(0, 0, 1920, 1040)):
+        if windows is None:
+            windows = {100: "Notepad", 200: "Calculator"}
+        win32 = MagicMock()
+
+        def fake_enum(callback):
+            for hwnd, title in windows.items():
+                win32.is_window_visible.return_value = True
+                win32.get_window_text.return_value = title
+                callback(hwnd)
+
+        win32.enum_windows.side_effect = fake_enum
+        win32.is_iconic.return_value = False
+        rect = MagicMock()
+        rect.left, rect.top, rect.right, rect.bottom = (10, 20, 810, 620)
+        win32.get_window_rect.return_value = rect
+        wa = MagicMock()
+        wa.left, wa.top, wa.right, wa.bottom = work_area
+        win32.get_work_area.return_value = wa
+        return win32
+
+
+class TestDirectCLI(_CLITestBase):
+    """Direct-mode CLI: python wman.py list|move|snap ..."""
+
+    @patch("wman.Win32API")
+    def test_list(self, MockWin32API):
+        win32 = self._make_win32()
+        MockWin32API.return_value = win32
+        with patch("sys.argv", ["wman.py", "list"]):
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                main()
+            output = buf.getvalue()
+        self.assertIn("Notepad", output)
+        self.assertIn("100", output)
+
+    @patch("wman.Win32API")
+    def test_move_with_args(self, MockWin32API):
+        win32 = self._make_win32()
+        MockWin32API.return_value = win32
+        with patch("sys.argv", ["wman.py", "move", "Notepad", "--x", "50", "--y", "60"]):
+            main()
+        win32.move_window.assert_called_once_with(100, 50, 60, 800, 600)
+
+    @patch("wman.Win32API")
+    def test_snap_left(self, MockWin32API):
+        win32 = self._make_win32()
+        MockWin32API.return_value = win32
+        with patch("sys.argv", ["wman.py", "snap", "Notepad", "--direction", "left"]):
+            main()
+        win32.move_window.assert_called_once_with(100, 0, 0, 960, 1040)
+
+
+class TestInteractiveCLI(_CLITestBase):
+    """Interactive menu mode: python wman.py (no args)."""
+
+    @patch("wman.Win32API")
+    @patch("builtins.input")
+    def test_list_then_quit(self, mock_input, MockWin32API):
+        win32 = self._make_win32()
+        MockWin32API.return_value = win32
+        mock_input.side_effect = ["1", "q"]
+        with patch("sys.argv", ["wman.py"]):
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                main()
+            output = buf.getvalue()
+        self.assertIn("Notepad", output)
+
+    @patch("wman.Win32API")
+    @patch("builtins.input")
+    def test_move_interactive(self, mock_input, MockWin32API):
+        win32 = self._make_win32()
+        MockWin32API.return_value = win32
+        # Choose move, enter window title, x=50, y empty, width empty, height empty, then quit
+        mock_input.side_effect = ["2", "Notepad", "50", "", "", "", "q"]
+        with patch("sys.argv", ["wman.py"]):
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                main()
+        win32.move_window.assert_called_once_with(100, 50, 20, 800, 600)
+
+    @patch("wman.Win32API")
+    @patch("builtins.input")
+    def test_snap_interactive(self, mock_input, MockWin32API):
+        win32 = self._make_win32()
+        MockWin32API.return_value = win32
+        # Choose snap, enter window title, direction left, then quit
+        mock_input.side_effect = ["3", "Notepad", "left", "q"]
+        with patch("sys.argv", ["wman.py"]):
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                main()
+        win32.move_window.assert_called_once_with(100, 0, 0, 960, 1040)
 
 
 if __name__ == "__main__":
