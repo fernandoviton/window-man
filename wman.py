@@ -64,3 +64,49 @@ def enumerate_windows(win32):
 
     win32.enum_windows(_collect)
     return windows
+
+
+SW_RESTORE = 9
+
+
+def find_window(win32, value):
+    """Find a window by hwnd (int or hex string) or title substring (case-insensitive).
+
+    Returns the hwnd. Raises ValueError if not found.
+    """
+    windows = enumerate_windows(win32)
+
+    # Try as integer hwnd first
+    try:
+        hwnd = int(value, 0)
+        if hwnd in windows:
+            return hwnd
+        raise ValueError(f"No visible window with hwnd {hwnd}")
+    except ValueError as e:
+        if "No visible window" in str(e):
+            raise
+
+    # Treat as title substring (case-insensitive)
+    needle = value.lower()
+    for hwnd, title in windows.items():
+        if needle in title.lower():
+            return hwnd
+    raise ValueError(f"No window matching '{value}'")
+
+
+def move_window(win32, hwnd, x=None, y=None, width=None, height=None):
+    """Move/resize a window. Unspecified params keep current values. Restores if minimized."""
+    if win32.is_iconic(hwnd):
+        win32.show_window(hwnd, SW_RESTORE)
+
+    rect = win32.get_window_rect(hwnd)
+    cur_x, cur_y = rect.left, rect.top
+    cur_w, cur_h = rect.right - rect.left, rect.bottom - rect.top
+
+    win32.move_window(
+        hwnd,
+        x if x is not None else cur_x,
+        y if y is not None else cur_y,
+        width if width is not None else cur_w,
+        height if height is not None else cur_h,
+    )
