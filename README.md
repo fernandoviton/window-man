@@ -25,6 +25,7 @@ Window Manager
 1. List windows
 2. Move a window
 3. Snap a window
+4. Ensure a window (launch if needed)
 q. Quit
 
 Choose:
@@ -41,6 +42,9 @@ python wman.py move <window> [--x X] [--y Y] [--width W] [--height H]
 
 # Snap a window to left or right half of the screen
 python wman.py snap <window> --direction left|right
+
+# Launch an app if no matching window is found
+python wman.py ensure <title> --path <executable>
 ```
 
 `<window>` can be:
@@ -74,5 +78,4 @@ All Win32 APIs are mocked — tests run on any platform.
 - Title matching fails if multiple windows match, listing all candidates.
 
 ## TODO
-- Explore launching
 - Do full persistence and rehydration

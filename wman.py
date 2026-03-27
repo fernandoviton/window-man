@@ -55,6 +55,34 @@ class Win32API:
         )
         return rect
 
+    def get_process_path(self, hwnd):
+        """Return the full executable path for the process owning hwnd, or None."""
+        pid = wintypes.DWORD()
+        ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if not pid.value:
+            return None
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        ctypes.windll.kernel32.OpenProcess.restype = wintypes.HANDLE
+        handle = ctypes.windll.kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value
+        )
+        if not handle:
+            return None
+        try:
+            buf = ctypes.create_unicode_buffer(1024)
+            size = wintypes.DWORD(1024)
+            ok = ctypes.windll.kernel32.QueryFullProcessImageNameW(
+                handle, 0, buf, ctypes.byref(size)
+            )
+            return buf.value if ok else None
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+
+    def shell_execute(self, path):
+        ctypes.windll.shell32.ShellExecuteW.restype = wintypes.HINSTANCE
+        result = ctypes.windll.shell32.ShellExecuteW(None, "open", path, None, None, 1)
+        return int(result) if result else 0
+
 
 def enumerate_windows(win32):
     """Return {hwnd: title} for all visible windows with non-empty titles."""
@@ -154,6 +182,7 @@ def _interactive(win32):
         print("1. List windows")
         print("2. Move a window")
         print("3. Snap a window")
+        print("4. Ensure a window (launch if needed)")
         print("q. Quit")
         print()
         choice = input("Choose: ").strip()
@@ -191,6 +220,15 @@ def _interactive(win32):
             direction = input("Direction (left/right): ").strip()
             snap_window(win32, hwnd, direction)
             print("Snapped.")
+        elif choice == "4":
+            from ensure import ensure_window
+            title = input("Window title to find: ").strip()
+            try:
+                ensure_window(win32, title)
+            except ValueError:
+                path = input("Path to launch: ").strip()
+                if path:
+                    ensure_window(win32, title, path=path)
 
 
 def main():
@@ -214,6 +252,10 @@ def main():
         snap_p.add_argument("window", help="Window title substring or hwnd")
         snap_p.add_argument("--direction", required=True, choices=["left", "right"])
 
+        ensure_p = sub.add_parser("ensure", help="Launch app if not already running")
+        ensure_p.add_argument("title", help="Window title substring to search for")
+        ensure_p.add_argument("--path", default=None, help="Path to launch if not found")
+
         args = parser.parse_args()
 
         if args.command == "list":
@@ -226,6 +268,9 @@ def main():
             hwnd = find_window(win32, args.window)
             snap_window(win32, hwnd, args.direction)
             print("Snapped.")
+        elif args.command == "ensure":
+            from ensure import ensure_window
+            ensure_window(win32, args.title, args.path)
     else:
         _interactive(win32)
 
