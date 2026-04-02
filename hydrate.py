@@ -6,13 +6,19 @@ from layout import WindowEntry
 from wman import enumerate_windows, move_window, SW_RESTORE
 
 
-def snapshot(win32, group=None) -> list[WindowEntry]:
-    """Capture all visible windows as a list of WindowEntry."""
+def snapshot(win32, group=None, ignore=None) -> list[WindowEntry]:
+    """Capture all visible windows as a list of WindowEntry.
+
+    ignore: optional callable(path, title) → bool.  When it returns True
+    the window is silently skipped.
+    """
     windows = enumerate_windows(win32)
     entries = []
     for hwnd, title in windows.items():
         rect = win32.get_window_rect(hwnd)
         path = win32.get_process_path(hwnd)
+        if ignore and ignore(path, title):
+            continue
         entries.append(WindowEntry(
             title=title, path=path,
             x=rect.left, y=rect.top,
@@ -46,7 +52,7 @@ def restore(win32, entries: list[WindowEntry]) -> None:
             print(f"Skipping '{entry.title}': not running and no path to launch")
 
 
-def diff_layout(win32, existing_entries, group_only=False):
+def diff_layout(win32, existing_entries, group_only=False, ignore=None):
     """Compare running windows against existing layout entries.
 
     Matches by executable path, using title similarity as tiebreaker
@@ -57,7 +63,7 @@ def diff_layout(win32, existing_entries, group_only=False):
     - added: running windows not matching any entry (empty if group_only)
     - removed: entries with no matching running window
     """
-    current = snapshot(win32)
+    current = snapshot(win32, ignore=ignore)
 
     # Group existing entries and current windows by path
     # Skip None-path entries (can't be reliably matched)

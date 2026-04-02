@@ -271,5 +271,38 @@ class TestDiffLayout(_HydrateTestBase):
         self.assertEqual(len(added), 1)
 
 
+class TestSnapshotFiltering(_HydrateTestBase):
+    """snapshot() should respect the ignore callback when provided."""
+
+    def test_ignore_callback_excludes_matching_windows(self):
+        win32 = self._make_win32([
+            (0x100, "Notepad", r"C:\Windows\notepad.exe", (10, 20, 810, 620)),
+            (0x200, "Noise", r"C:\noise.exe", (0, 0, 100, 100)),
+            (0x300, "More Noise", r"C:\junk.exe", (0, 0, 100, 100)),
+        ])
+        ignore = lambda path, title: path in (r"C:\noise.exe", r"C:\junk.exe")
+        result = snapshot(win32, ignore=ignore)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].title, "Notepad")
+
+    def test_no_ignore_callback_captures_everything(self):
+        win32 = self._make_win32([
+            (0x100, "Notepad", r"C:\Windows\notepad.exe", (10, 20, 810, 620)),
+            (0x200, "Noise", r"C:\noise.exe", (0, 0, 100, 100)),
+        ])
+        result = snapshot(win32)
+        self.assertEqual(len(result), 2)
+
+    def test_diff_layout_passes_ignore_to_snapshot(self):
+        win32 = self._make_win32([
+            (0x100, "Notepad", r"C:\Windows\notepad.exe", (10, 20, 810, 620)),
+            (0x200, "Noise", r"C:\noise.exe", (0, 0, 100, 100)),
+        ])
+        ignore = lambda path, title: path == r"C:\noise.exe"
+        updated, added, removed = diff_layout(win32, [], ignore=ignore)
+        self.assertEqual(len(added), 1)
+        self.assertEqual(added[0].title, "Notepad")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, call, patch
 
-from wman import enumerate_windows, find_window, move_window, snap_window, main
+from wman import enumerate_windows, find_window, move_window, snap_window, main, is_ignored_window
 
 
 class TestEnumerateWindows(unittest.TestCase):
@@ -579,6 +579,46 @@ class TestLoadCLI(_CLITestBase):
                 main()
         output = buf.getvalue()
         self.assertIn("No layout found", output)
+
+
+class TestIsIgnoredWindow(unittest.TestCase):
+    """is_ignored_window() should filter out system/noise windows."""
+
+    def test_textinputhost_ignored(self):
+        path = r"C:\Windows\SystemApps\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\TextInputHost.exe"
+        self.assertTrue(is_ignored_window(path, "Windows Input Experience"))
+
+    def test_systemsettings_ignored(self):
+        path = r"C:\Windows\ImmersiveControlPanel\SystemSettings.exe"
+        self.assertTrue(is_ignored_window(path, "Settings"))
+
+    def test_applicationframehost_ignored(self):
+        path = r"C:\Windows\System32\ApplicationFrameHost.exe"
+        self.assertTrue(is_ignored_window(path, "Settings"))
+
+    def test_m365copilot_ignored(self):
+        path = r"C:\Program Files\WindowsApps\Microsoft.MicrosoftOfficeHub_19.2603.38021.0_x64__8wekyb3d8bbwe\M365Copilot.exe"
+        self.assertTrue(is_ignored_window(path, "Microsoft 365 Copilot"))
+
+    def test_explorer_program_manager_ignored(self):
+        path = r"C:\Windows\explorer.exe"
+        self.assertTrue(is_ignored_window(path, "Program Manager"))
+
+    def test_explorer_file_explorer_not_ignored(self):
+        path = r"C:\Windows\explorer.exe"
+        self.assertFalse(is_ignored_window(path, "Documents"))
+
+    def test_normal_app_not_ignored(self):
+        self.assertFalse(is_ignored_window(r"C:\Windows\notepad.exe", "Notepad"))
+
+    def test_none_path_not_ignored(self):
+        self.assertFalse(is_ignored_window(None, "Something"))
+
+    def test_case_insensitive_exe_match(self):
+        self.assertTrue(is_ignored_window(r"C:\TEXTINPUTHOST.EXE", "whatever"))
+
+    def test_case_insensitive_title_match(self):
+        self.assertTrue(is_ignored_window(r"C:\Windows\Explorer.EXE", "program manager"))
 
 
 if __name__ == "__main__":

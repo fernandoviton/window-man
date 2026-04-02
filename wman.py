@@ -3,10 +3,37 @@
 import argparse
 import ctypes
 import ctypes.wintypes as wintypes
+import os
 import sys
 
 WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 SPI_GETWORKAREA = 0x0030
+
+# Executables always excluded from layout captures — system/framework
+# processes that aren't meaningful user windows.
+IGNORED_EXECUTABLES = {
+    "textinputhost.exe",        # Windows Input Experience (IME / emoji picker)
+    "systemsettings.exe",       # Settings app (transient)
+    "applicationframehost.exe", # UWP frame host (duplicates real app entry)
+    "m365copilot.exe",          # Microsoft 365 Copilot hub (ephemeral)
+}
+
+# Executables excluded only when their title matches a specific pattern.
+IGNORED_TITLES = {
+    "explorer.exe": {"program manager"},  # Desktop shell, not a user window
+}
+
+
+def is_ignored_window(path, title):
+    """Return True if a window should be excluded from layout captures."""
+    if path is None:
+        return False
+    exe = os.path.basename(path).lower()
+    if exe in IGNORED_EXECUTABLES:
+        return True
+    if exe in IGNORED_TITLES:
+        return title.lower() in IGNORED_TITLES[exe]
+    return False
 
 
 class Win32API:
@@ -261,13 +288,9 @@ def _interactive(win32):
                 if not existing:
                     print(f"No entries for group '{group}' to update.")
                     continue
-                updated, added, removed = diff_layout(win32, existing, group_only=True)
+                updated, added, removed = diff_layout(win32, existing, group_only=True, ignore=is_ignored_window)
             else:
-                updated, added, removed = diff_layout(win32, all_entries)
-
-            if not updated and not added and not removed:
-                print("Nothing to update.")
-                continue
+                updated, added, removed = diff_layout(win32, all_entries, ignore=is_ignored_window)
 
             _print_update_preview(updated, added, removed, group=group)
             answer = input("Proceed? [y/N]: ").strip().lower()
@@ -362,9 +385,9 @@ def main():
                 if not existing:
                     print(f"No entries for group '{args.group}' to update.")
                     return
-                updated, added, removed = diff_layout(win32, existing, group_only=True)
+                updated, added, removed = diff_layout(win32, existing, group_only=True, ignore=is_ignored_window)
             else:
-                updated, added, removed = diff_layout(win32, all_entries)
+                updated, added, removed = diff_layout(win32, all_entries, ignore=is_ignored_window)
 
             if not updated and not added and not removed:
                 print("Nothing to update.")
