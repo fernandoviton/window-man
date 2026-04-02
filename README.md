@@ -10,7 +10,61 @@ python -m venv .venv
 pip install pyyaml
 ```
 
-## Usage
+## Typical workflow: Save → Edit → Load
+
+The core loop is three steps:
+
+### 1. Save — snapshot your current windows
+
+```bash
+python wman.py update
+```
+
+This diffs every visible window against `layout.yml`, shows what will be added/updated/removed, and asks for confirmation before writing.
+
+### 2. Edit — curate the layout file by hand
+
+Open `layout.yml` and tweak it:
+
+- **Delete entries** you don't want restored (one-off dialogs, system windows, etc.)
+- **Add a `group` tag** to organise entries (optional — entries without a group are included in every load)
+- **Adjust positions** if you want to fine-tune where a window lands
+
+```yaml
+# Group your everyday apps so they always come back
+- title: "Microsoft Teams"
+  path: "C:\\...\\ms-teams.exe"
+  x: 0
+  y: 0
+  width: 1920
+  height: 1040
+  group: always          # ← optional tag
+
+# Group your dev tools separately
+- title: "Visual Studio Code"
+  path: "C:\\...\\Code.exe"
+  x: 0
+  y: 0
+  width: 960
+  height: 1040
+  group: dev
+```
+
+### 3. Load — restore windows from the layout
+
+```bash
+# Restore everything
+python wman.py load
+
+# Restore a single group
+python wman.py load --group dev
+```
+
+Loading launches any missing apps and repositions all matching windows.
+
+---
+
+## All commands
 
 ### Interactive mode
 
@@ -63,51 +117,6 @@ python wman.py load [--file layout.yml] [--group NAME]
 `<window>` can be:
 - A title substring (case-insensitive): `"Notepad"`, `"calc"`
 - A window handle (decimal or hex): `12345`, `0x3039`
-
-## Layout file
-
-Layouts are stored as a flat YAML list. Each entry has an optional `group` tag:
-
-```yaml
-- title: "Microsoft Teams"
-  path: "C:\\...\\ms-teams.exe"
-  x: 0
-  y: 0
-  width: 1920
-  height: 1040
-  group: always
-
-- title: "Visual Studio Code"
-  path: "C:\\...\\Code.exe"
-  x: 0
-  y: 0
-  width: 960
-  height: 1040
-  group: dev
-
-- title: "Untitled - Notepad"
-  path: "C:\\Windows\\notepad.exe"
-  x: 100
-  y: 200
-  width: 800
-  height: 600
-```
-
-## Examples
-
-```bash
-# Snap Notepad to the left half of the screen
-python wman.py snap "Notepad" --direction left
-
-# Move a window by handle to a specific position
-python wman.py move 0x3039 --x 100 --y 100 --width 800 --height 600
-
-# Save all windows as the "dev" group
-python wman.py update --group dev
-
-# Restore the "dev" group (launches missing apps, repositions running ones)
-python wman.py load --group dev
-```
 
 ## Running tests
 
