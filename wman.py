@@ -173,6 +173,25 @@ def _print_windows(win32):
         print(f"{hwnd:>10}  {title}")
 
 
+def _print_update_preview(updated, added, removed, group=None):
+    """Print a summary of what update will do."""
+    label = f"Group '{group}' update" if group else "Update"
+    print(f"\n{label} preview:")
+    if updated:
+        print(f"  Updated ({len(updated)}):")
+        for e in updated:
+            print(f"    - {e.title}")
+    if added:
+        print(f"  Added ({len(added)}):")
+        for e in added:
+            print(f"    - {e.title}")
+    if removed:
+        print(f"  Removed ({len(removed)}):")
+        for e in removed:
+            print(f"    - {e.title}")
+    print()
+
+
 def _interactive(win32):
     """Interactive menu loop."""
     while True:
@@ -183,6 +202,8 @@ def _interactive(win32):
         print("2. Move a window")
         print("3. Snap a window")
         print("4. Ensure a window (launch if needed)")
+        print("5. Update layout")
+        print("6. Load layout")
         print("q. Quit")
         print()
         choice = input("Choose: ").strip()
@@ -229,6 +250,59 @@ def _interactive(win32):
                 path = input("Path to launch: ").strip()
                 if path:
                     ensure_window(win32, title, path=path)
+        elif choice == "5":
+            from hydrate import diff_layout
+            from layout import load_layout, save_layout
+            file_path = input("File (enter for layout.yml): ").strip() or "layout.yml"
+            group = input("Group name (enter to update all): ").strip() or None
+            all_entries = load_layout(file_path)
+            if group is not None:
+                existing = [e for e in all_entries if e.group == group]
+                if not existing:
+                    print(f"No entries for group '{group}' to update.")
+                    continue
+                updated, added, removed = diff_layout(win32, existing, group_only=True)
+            else:
+                updated, added, removed = diff_layout(win32, all_entries)
+
+            if not updated and not added and not removed:
+                print("Nothing to update.")
+                continue
+
+            _print_update_preview(updated, added, removed, group=group)
+            answer = input("Proceed? [y/N]: ").strip().lower()
+            if answer != "y":
+                print("Aborted.")
+                continue
+
+            if group is not None:
+                others = [e for e in all_entries if e.group != group]
+                save_layout(file_path, others + updated + added, replace_all=True)
+            else:
+                save_layout(file_path, updated + added, replace_all=True)
+            print(f"Updated '{file_path}' ({len(updated)} updated, {len(added)} added, {len(removed)} removed)")
+        elif choice == "6":
+            from hydrate import restore
+            from layout import load_layout
+            file_path = input("File (enter for layout.yml): ").strip() or "layout.yml"
+            all_entries = load_layout(file_path)
+            if not all_entries:
+                print(f"No layout found in '{file_path}'")
+                continue
+            groups = sorted({e.group for e in all_entries if e.group})
+            if groups:
+                print("Available groups:", ", ".join(groups))
+                group = input("Group name (enter to load all): ").strip() or None
+            else:
+                group = None
+            if group:
+                entries = [e for e in all_entries if e.group == group]
+                if not entries:
+                    print(f"Group '{group}' not found.")
+                else:
+                    restore(win32, entries)
+            else:
+                restore(win32, all_entries)
 
 
 def main():
@@ -256,6 +330,14 @@ def main():
         ensure_p.add_argument("title", help="Window title substring to search for")
         ensure_p.add_argument("--path", default=None, help="Path to launch if not found")
 
+        save_p = sub.add_parser("update", help="Update window layout YAML (diff + confirm)")
+        save_p.add_argument("--file", default="layout.yml", help="YAML file path")
+        save_p.add_argument("--group", default=None, help="Only update entries with this group")
+
+        load_p = sub.add_parser("load", help="Load and restore a window layout from YAML")
+        load_p.add_argument("--file", default="layout.yml", help="YAML file path")
+        load_p.add_argument("--group", default=None, help="Load only entries with this group")
+
         args = parser.parse_args()
 
         if args.command == "list":
@@ -271,6 +353,51 @@ def main():
         elif args.command == "ensure":
             from ensure import ensure_window
             ensure_window(win32, args.title, args.path)
+        elif args.command == "update":
+            from hydrate import diff_layout
+            from layout import load_layout, save_layout
+            all_entries = load_layout(args.file)
+            if args.group is not None:
+                existing = [e for e in all_entries if e.group == args.group]
+                if not existing:
+                    print(f"No entries for group '{args.group}' to update.")
+                    return
+                updated, added, removed = diff_layout(win32, existing, group_only=True)
+            else:
+                updated, added, removed = diff_layout(win32, all_entries)
+
+            if not updated and not added and not removed:
+                print("Nothing to update.")
+                return
+
+            _print_update_preview(updated, added, removed, group=args.group)
+            answer = input("Proceed? [y/N]: ").strip().lower()
+            if answer != "y":
+                print("Aborted.")
+                return
+
+            if args.group is not None:
+                # Replace only this group's entries, keep others
+                others = [e for e in all_entries if e.group != args.group]
+                save_layout(args.file, others + updated + added, replace_all=True)
+            else:
+                save_layout(args.file, updated + added, replace_all=True)
+            print(f"Updated '{args.file}' ({len(updated)} updated, {len(added)} added, {len(removed)} removed)")
+        elif args.command == "load":
+            from hydrate import restore
+            from layout import load_layout
+            all_entries = load_layout(args.file)
+            if not all_entries:
+                print(f"No layout found in '{args.file}'")
+            elif args.group is not None:
+                entries = [e for e in all_entries if e.group == args.group]
+                if not entries:
+                    groups = sorted({e.group for e in all_entries if e.group})
+                    print(f"Group '{args.group}' not found in '{args.file}'. Available: {', '.join(groups) or '(none)'}")
+                else:
+                    restore(win32, entries)
+            else:
+                restore(win32, all_entries)
     else:
         _interactive(win32)
 

@@ -1,7 +1,9 @@
 """Tests for wman.py."""
 
 import io
+import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import MagicMock, call, patch
 
@@ -295,6 +297,288 @@ class TestInteractiveCLI(_CLITestBase):
             with patch("sys.stdout", buf):
                 main()
         win32.move_window.assert_called_once_with(100, 0, 0, 960, 1040)
+
+    @patch("wman.Win32API")
+    @patch("builtins.input")
+    def test_update_interactive_no_group(self, mock_input, MockWin32API):
+        win32 = self._make_win32()
+        win32.get_process_path.return_value = "notepad.exe"
+        win32.get_window_rect.return_value = MagicMock(left=10, top=20, right=810, bottom=620)
+        MockWin32API.return_value = win32
+        with tempfile.NamedTemporaryFile(suffix=".yml", delete=False) as f:
+            tmp = f.name
+        os.remove(tmp)
+        try:
+            # Choose update, enter file, empty group, confirm yes, then quit
+            mock_input.side_effect = ["5", tmp, "", "y", "q"]
+            with patch("sys.argv", ["wman.py"]):
+                buf = io.StringIO()
+                with patch("sys.stdout", buf):
+                    main()
+            from layout import load_layout
+            result = load_layout(tmp)
+            self.assertTrue(len(result) > 0)
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+
+    @patch("wman.Win32API")
+    @patch("builtins.input")
+    def test_update_interactive_with_group(self, mock_input, MockWin32API):
+        from layout import save_layout, load_layout, WindowEntry
+        win32 = self._make_win32()
+        win32.get_process_path.return_value = "notepad.exe"
+        win32.get_window_rect.return_value = MagicMock(left=10, top=20, right=810, bottom=620)
+        MockWin32API.return_value = win32
+        with tempfile.NamedTemporaryFile(suffix=".yml", delete=False) as f:
+            tmp = f.name
+        try:
+            save_layout(tmp, [
+                WindowEntry("Notepad", "notepad.exe", 0, 0, 800, 600, group="dev"),
+            ])
+            # Choose update, enter file, group "dev", confirm yes, then quit
+            mock_input.side_effect = ["5", tmp, "dev", "y", "q"]
+            with patch("sys.argv", ["wman.py"]):
+                buf = io.StringIO()
+                with patch("sys.stdout", buf):
+                    main()
+            result = load_layout(tmp)
+            dev = [e for e in result if e.group == "dev"]
+            self.assertTrue(len(dev) > 0)
+        finally:
+            os.remove(tmp)
+
+    @patch("wman.Win32API")
+    @patch("builtins.input")
+    def test_load_interactive_selects_group(self, mock_input, MockWin32API):
+        win32 = self._make_win32(windows={})
+        win32.shell_execute.return_value = 42
+        MockWin32API.return_value = win32
+        from layout import save_layout, WindowEntry
+        with tempfile.NamedTemporaryFile(suffix=".yml", delete=False) as f:
+            tmp = f.name
+        try:
+            save_layout(tmp, [
+                WindowEntry("Code", "code.exe", 0, 0, 960, 1040, group="dev"),
+                WindowEntry("Slack", "slack.exe", 960, 0, 960, 1040, group="comms"),
+            ])
+            # Choose load, enter file, pick "dev", then quit
+            mock_input.side_effect = ["6", tmp, "dev", "q"]
+            with patch("sys.argv", ["wman.py"]):
+                buf = io.StringIO()
+                with patch("sys.stdout", buf):
+                    main()
+                output = buf.getvalue()
+            self.assertIn("dev", output)
+            self.assertIn("comms", output)
+            win32.shell_execute.assert_called_once_with("code.exe")
+        finally:
+            os.remove(tmp)
+
+
+class TestUpdateCLI(_CLITestBase):
+    """Direct-mode CLI: python wman.py update ..."""
+
+    def _make_win32_with_paths(self, windows):
+        """Create a Win32API mock with full window data.
+
+        windows: list of (hwnd, title, path, rect) tuples.
+        rect is (left, top, right, bottom).
+        """
+        win32 = MagicMock()
+        rects = {}
+        paths = {}
+
+        for hwnd, title, path, rect in windows:
+            r = MagicMock()
+            r.left, r.top, r.right, r.bottom = rect
+            rects[hwnd] = r
+            paths[hwnd] = path
+
+        def fake_enum(callback):
+            for hwnd, title, _path, _rect in windows:
+                win32.is_window_visible.return_value = True
+                win32.get_window_text.return_value = title
+                callback(hwnd)
+
+        win32.enum_windows.side_effect = fake_enum
+        win32.get_window_rect.side_effect = lambda h: rects[h]
+        win32.get_process_path.side_effect = lambda h: paths[h]
+        win32.is_iconic.return_value = False
+        return win32
+
+    @patch("wman.Win32API")
+    @patch("builtins.input", return_value="y")
+    def test_update_no_existing_file_adds_all(self, mock_input, MockWin32API):
+        win32 = self._make_win32_with_paths([
+            (0x100, "Notepad", r"C:\notepad.exe", (10, 20, 810, 620)),
+            (0x200, "Calc", r"C:\calc.exe", (100, 100, 500, 400)),
+        ])
+        MockWin32API.return_value = win32
+        with tempfile.NamedTemporaryFile(suffix=".yml", delete=False) as f:
+            tmp = f.name
+        os.remove(tmp)
+        try:
+            with patch("sys.argv", ["wman.py", "update", "--file", tmp]):
+                buf = io.StringIO()
+                with patch("sys.stdout", buf):
+                    main()
+            from layout import load_layout
+            result = load_layout(tmp)
+            self.assertEqual(len(result), 2)
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+
+    @patch("wman.Win32API")
+    @patch("builtins.input", return_value="n")
+    def test_update_declined_does_not_write(self, mock_input, MockWin32API):
+        win32 = self._make_win32_with_paths([
+            (0x100, "Notepad", r"C:\notepad.exe", (10, 20, 810, 620)),
+        ])
+        MockWin32API.return_value = win32
+        with tempfile.NamedTemporaryFile(suffix=".yml", delete=False) as f:
+            tmp = f.name
+        os.remove(tmp)
+        try:
+            with patch("sys.argv", ["wman.py", "update", "--file", tmp]):
+                buf = io.StringIO()
+                with patch("sys.stdout", buf):
+                    main()
+            self.assertFalse(os.path.exists(tmp))
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+
+    @patch("wman.Win32API")
+    @patch("builtins.input", return_value="y")
+    def test_update_group_updates_matched_and_removes_unmatched(self, mock_input, MockWin32API):
+        from layout import save_layout, load_layout, WindowEntry
+        with tempfile.NamedTemporaryFile(suffix=".yml", delete=False) as f:
+            tmp = f.name
+        try:
+            save_layout(tmp, [
+                WindowEntry("Code", r"C:\code.exe", 0, 0, 960, 1040, group="dev"),
+                WindowEntry("Outlook", r"C:\outlook.exe", 0, 0, 960, 1040, group="dev"),
+            ])
+            save_layout(tmp, [
+                WindowEntry("Slack", r"C:\slack.exe", 0, 0, 960, 1040, group="comms"),
+            ])
+            # Code is running at a new position; Outlook is not running
+            win32 = self._make_win32_with_paths([
+                (0x100, "Code", r"C:\code.exe", (50, 50, 1010, 1090)),
+            ])
+            MockWin32API.return_value = win32
+            with patch("sys.argv", ["wman.py", "update", "--file", tmp, "--group", "dev"]):
+                buf = io.StringIO()
+                with patch("sys.stdout", buf):
+                    main()
+            result = load_layout(tmp)
+            comms = [e for e in result if e.group == "comms"]
+            self.assertEqual(len(comms), 1)
+            self.assertEqual(comms[0].title, "Slack")
+            dev = [e for e in result if e.group == "dev"]
+            self.assertEqual(len(dev), 1)
+            self.assertEqual(dev[0].title, "Code")
+            self.assertEqual(dev[0].x, 50)
+        finally:
+            os.remove(tmp)
+
+    @patch("wman.Win32API")
+    def test_update_group_empty_file_does_nothing(self, MockWin32API):
+        win32 = self._make_win32_with_paths([
+            (0x100, "Notepad", r"C:\notepad.exe", (10, 20, 810, 620)),
+        ])
+        MockWin32API.return_value = win32
+        with tempfile.NamedTemporaryFile(suffix=".yml", delete=False) as f:
+            tmp = f.name
+        os.remove(tmp)
+        try:
+            with patch("sys.argv", ["wman.py", "update", "--file", tmp, "--group", "dev"]):
+                buf = io.StringIO()
+                with patch("sys.stdout", buf):
+                    main()
+            output = buf.getvalue()
+            self.assertFalse(os.path.exists(tmp))
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+
+
+class TestLoadCLI(_CLITestBase):
+    """Direct-mode CLI: python wman.py load ..."""
+
+    @patch("wman.Win32API")
+    def test_load_all(self, MockWin32API):
+        win32 = self._make_win32(windows={})
+        win32.shell_execute.return_value = 42
+        MockWin32API.return_value = win32
+        from layout import save_layout, WindowEntry
+        with tempfile.NamedTemporaryFile(suffix=".yml", delete=False) as f:
+            tmp = f.name
+        try:
+            save_layout(tmp, [
+                WindowEntry("Notepad", "notepad.exe", 10, 20, 800, 600),
+            ])
+            with patch("sys.argv", ["wman.py", "load", "--file", tmp]):
+                buf = io.StringIO()
+                with patch("sys.stdout", buf):
+                    main()
+            win32.shell_execute.assert_called_once_with("notepad.exe")
+        finally:
+            os.remove(tmp)
+
+    @patch("wman.Win32API")
+    def test_load_named_group(self, MockWin32API):
+        win32 = self._make_win32(windows={})
+        win32.shell_execute.return_value = 42
+        MockWin32API.return_value = win32
+        from layout import save_layout, WindowEntry
+        with tempfile.NamedTemporaryFile(suffix=".yml", delete=False) as f:
+            tmp = f.name
+        try:
+            save_layout(tmp, [
+                WindowEntry("Code", "code.exe", 0, 0, 960, 1040, group="dev"),
+                WindowEntry("Slack", "slack.exe", 960, 0, 960, 1040, group="comms"),
+            ])
+            with patch("sys.argv", ["wman.py", "load", "--file", tmp, "--group", "dev"]):
+                buf = io.StringIO()
+                with patch("sys.stdout", buf):
+                    main()
+            win32.shell_execute.assert_called_once_with("code.exe")
+        finally:
+            os.remove(tmp)
+
+    @patch("wman.Win32API")
+    def test_load_missing_group_prints_error(self, MockWin32API):
+        win32 = self._make_win32(windows={})
+        MockWin32API.return_value = win32
+        from layout import save_layout, WindowEntry
+        with tempfile.NamedTemporaryFile(suffix=".yml", delete=False) as f:
+            tmp = f.name
+        try:
+            save_layout(tmp, [
+                WindowEntry("Notepad", "notepad.exe", 0, 0, 800, 600, group="dev"),
+            ])
+            with patch("sys.argv", ["wman.py", "load", "--file", tmp, "--group", "nope"]):
+                buf = io.StringIO()
+                with patch("sys.stdout", buf):
+                    main()
+            output = buf.getvalue()
+            self.assertIn("nope", output)
+        finally:
+            os.remove(tmp)
+
+    @patch("wman.Win32API")
+    def test_load_missing_file_prints_error(self, MockWin32API):
+        win32 = self._make_win32(windows={})
+        MockWin32API.return_value = win32
+        with patch("sys.argv", ["wman.py", "load", "--file", "nonexistent_xyz.yml"]):
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                main()
+        output = buf.getvalue()
+        self.assertIn("No layout found", output)
 
 
 if __name__ == "__main__":
